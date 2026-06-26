@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+@theme {
+  --color-hud-bg: #080b11;
+  --color-hud-card: rgba(13, 17, 28, 0.7);
+  --color-hud-card-hover: rgba(20, 26, 42, 0.8);
+  --color-hud-accent: #00f2ff;
+  --color-hud-accent-dim: rgba(0, 242, 255, 0.1);
+  --color-hud-border: rgba(0, 242, 255, 0.15);
+  --color-hud-border-hover: rgba(0, 242, 255, 0.35);
+  --color-hud-text: #e2e8f0;
+  --color-hud-muted: #94a3b8;
+  --color-hud-glow: rgba(0, 242, 255, 0.4);
+  
+  --font-sans: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* Custom styles and overrides */
+@layer base {
+  body {
+    background-color: var(--color-hud-bg);
+    color: var(--color-hud-text);
+    font-family: var(--font-sans);
+    margin: 0;
+    overflow-x: hidden;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #080b11;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 242, 255, 0.2);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 242, 255, 0.4);
+  }
+}
+
+@layer utilities {
+  .hud-glass {
+    background: var(--color-hud-card);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--color-hud-border);
+  }
+  
+  .hud-glass-hover {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .hud-glass-hover:hover {
+    background: var(--color-hud-card-hover);
+    border-color: var(--color-hud-border-hover);
+    box-shadow: 0 0 15px rgba(0, 242, 255, 0.1);
+  }
+
+  .hud-glow-text {
+    text-shadow: 0 0 10px rgba(0, 242, 255, 0.5);
+  }
+
+  .hud-glow-border {
+    box-shadow: 0 0 10px rgba(0, 242, 255, 0.2);
+  }
+}
+
+/* Loading animations */
+@keyframes hud-scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+.hud-scanline-effect {
+  position: relative;
+  overflow: hidden;
+}
+
+.hud-scanline-effect::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 242, 255, 0) 0%,
+    rgba(0, 242, 255, 0.05) 10%,
+    rgba(0, 242, 255, 0) 20%
+  );
+  animation: hud-scanline 6s linear infinite;
+  pointer-events: none;
+}

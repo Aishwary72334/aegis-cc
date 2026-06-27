@@ -201,8 +201,20 @@ export default function AppLayout({ children }) {
         </header>
 
         {/* Scrollable Dashboard Pane */}
-        <main className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6">
+        <main className="flex-1 overflow-y-auto p-6 md:p-6 pb-4 md:pb-4 space-y-6">
           {children}
+          <footer className="pt-4 border-t border-hud-border/10 text-center font-mono text-[9px] text-hud-muted/50">
+            © 2026 Aegis. Designed and developed by{' '}
+            <a 
+              href="http://www.theaish.xyz/" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="text-hud-accent hover:text-hud-accent/80 hover:underline transition-colors font-semibold"
+            >
+              Aishwary Agarwal
+            </a>
+            . All rights reserved.
+          </footer>
         </main>
       </div>
     </div>

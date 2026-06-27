@@ -72,7 +72,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Dashboard Top Header */}
       <div className="flex justify-between items-center border-b border-hud-border/40 pb-4">
         <div>
@@ -110,10 +110,10 @@ export default function Dashboard() {
       </div>
 
       {/* Grid Sections */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         
         {/* Left Side Panel - Today's Schedule & High Priority */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-4">
           
           {/* Today's Schedule panel */}
           <div className="hud-glass p-5 rounded-xl space-y-4">
@@ -210,7 +210,7 @@ export default function Dashboard() {
         </div>
 
         {/* Right Side Panel - Goals, Notes & System Log */}
-        <div className="space-y-6">
+        <div className="space-y-4">
           
           {/* Goal Progress Panel */}
           <div className="hud-glass p-5 rounded-xl space-y-4">

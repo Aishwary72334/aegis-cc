@@ -21,35 +21,109 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Silently refresh dashboard telemetry data
+  const fetchDashboardData = async () => {
+    try {
+      const [eventsRes, tasksRes, goalsRes, notesRes] = await Promise.all([
+        api.get('/events'),
+        api.get('/tasks'),
+        api.get('/goals'),
+        api.get('/notes')
+      ]);
+      setEvents(eventsRes.data);
+      setTasks(tasksRes.data);
+      setGoals(goalsRes.data);
+      setNotes(notesRes.data);
+    } catch (err) {
+      console.error('Failed to load dashboard data:', err);
+      setError('Error synchronizing telemetry modules.');
+    }
+  };
+
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        setLoading(true);
-        const [eventsRes, tasksRes, goalsRes, notesRes] = await Promise.all([
-          api.get('/events'),
-          api.get('/tasks'),
-          api.get('/goals'),
-          api.get('/notes')
-        ]);
-        setEvents(eventsRes.data);
-        setTasks(tasksRes.data);
-        setGoals(goalsRes.data);
-        setNotes(notesRes.data);
-      } catch (err) {
-        console.error('Failed to load dashboard data:', err);
-        setError('Error synchronizing telemetry modules.');
-      } finally {
-        setLoading(false);
-      }
+    const init = async () => {
+      setLoading(true);
+      await fetchDashboardData();
+      setLoading(false);
     };
-    fetchDashboardData();
+    init();
   }, []);
 
+  // Timezone helper to get local date string YYYY-MM-DD
+  const getLocalDateString = (date) => {
+    const offset = date.getTimezoneOffset();
+    const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+    return localDate.toISOString().split('T')[0];
+  };
+
+  const todayStr = getLocalDateString(new Date());
+
   // Filter computations
-  const todayStr = new Date().toISOString().split('T')[0];
   const todayEvents = events.filter(e => e.start_time.startsWith(todayStr));
-  
-  const highPriorityTasks = tasks.filter(t => 
+
+  // Today's & Overdue Tasks due up to the end of today
+  const todayTasks = tasks.filter(t => {
+    if (t.status === 'Completed' || t.status === 'Cancelled') return false;
+    if (!t.deadline) return false;
+    const taskDeadlineStr = getLocalDateString(new Date(t.deadline));
+    return taskDeadlineStr <= todayStr;
+  });
+
+  // Smart priority escalation/de-escalation based on deadline and estimated duration
+  const getDynamicPriority = (task) => {
+    if (!task.deadline) return task.priority;
+
+    const now = new Date();
+    const deadline = new Date(task.deadline);
+    const diffTime = deadline - now;
+    const diffDays = diffTime / (1000 * 60 * 60 * 24);
+
+    if (task.status === 'Completed' || task.status === 'Cancelled') {
+      return task.priority;
+    }
+
+    // Convert estimated duration (in minutes) to days
+    const estDays = (task.estimated_duration || 0) / (60 * 24);
+
+    // Safety buffer: at least 1 day for Critical, 2 days for High
+    const criticalThreshold = Math.max(1, estDays);
+    const highThreshold = Math.max(2, estDays * 2);
+
+    if (task.priority === 'Critical' || task.priority === 'High') {
+      if (diffDays <= criticalThreshold) {
+        return 'Critical';
+      } else if (diffDays <= highThreshold) {
+        return 'High';
+      } else {
+        return 'Medium';
+      }
+    }
+
+    return task.priority;
+  };
+
+  const getPriorityBadgeStyles = (priority) => {
+    switch (priority) {
+      case 'Critical':
+        return 'bg-red-950/60 text-red-400 border-red-500/30';
+      case 'High':
+        return 'bg-amber-950/60 text-amber-400 border-amber-500/30';
+      case 'Medium':
+        return 'bg-cyan-950/60 text-cyan-400 border-cyan-500/30';
+      default:
+        return 'bg-slate-900/60 text-hud-muted border-hud-border/40';
+    }
+  };
+
+  // Sort tasks by deadline (nearest first, no deadline at the bottom)
+  const sortedTasks = [...tasks].sort((a, b) => {
+    const dateA = a.deadline ? new Date(a.deadline).getTime() : Infinity;
+    const dateB = b.deadline ? new Date(b.deadline).getTime() : Infinity;
+    return dateA - dateB;
+  });
+
+  // Active Critical Tasks: filtered by stored high/critical priority, sorted by nearest deadline
+  const highPriorityTasks = sortedTasks.filter(t => 
     t.status !== 'Completed' && t.status !== 'Cancelled' && (t.priority === 'Critical' || t.priority === 'High')
   );
 
@@ -59,6 +133,59 @@ export default function Dashboard() {
   });
 
   const activeGoals = goals.filter(g => g.status === 'Active');
+
+  // Handle task complete toggle
+  const handleToggleTaskComplete = async (task) => {
+    try {
+      const newStatus = task.status === 'Completed' ? 'To Do' : 'Completed';
+      const updatePayload = {
+        title: task.title,
+        description: task.description || null,
+        priority: task.priority,
+        status: newStatus,
+        deadline: task.deadline ? new Date(task.deadline).toISOString() : null,
+        estimated_duration: task.estimated_duration || 0,
+        actual_duration: task.actual_duration || 0,
+        project_id: task.project_id || null,
+        tags: task.tags || [],
+        user_id: task.user_id
+      };
+
+      await api.put(`/tasks/${task.id}`, updatePayload);
+      await fetchDashboardData();
+    } catch (err) {
+      console.error('Failed to toggle task status:', err);
+      setError('Failed to update task telemetry.');
+    }
+  };
+
+  // Quick reschedule task to tomorrow
+  const handleShiftToTomorrow = async (task) => {
+    try {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(23, 59, 59, 999);
+
+      const updatePayload = {
+        title: task.title,
+        description: task.description || null,
+        priority: task.priority,
+        status: task.status,
+        deadline: tomorrow.toISOString(),
+        estimated_duration: task.estimated_duration || 0,
+        actual_duration: task.actual_duration || 0,
+        project_id: task.project_id || null,
+        tags: task.tags || [],
+        user_id: task.user_id
+      };
+
+      await api.put(`/tasks/${task.id}`, updatePayload);
+      await fetchDashboardData();
+    } catch (err) {
+      console.error('Failed to reschedule task:', err);
+      setError('Failed to reschedule task.');
+    }
+  };
 
   if (loading) {
     return (
@@ -94,7 +221,7 @@ export default function Dashboard() {
       {/* Metrics Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { name: "Today's Schedule", val: todayEvents.length, icon: Calendar, color: "text-hud-accent", link: "/calendar" },
+          { name: "Today's Agenda", val: todayEvents.length + todayTasks.length, icon: Calendar, color: "text-hud-accent", link: "/calendar" },
           { name: "Critical Priorities", val: highPriorityTasks.length, icon: AlertTriangle, color: "text-red-400", link: "/tasks" },
           { name: "Active Goals", val: activeGoals.length, icon: Target, color: "text-purple-400", link: "/goals" },
           { name: "Stored Logs", val: notes.length, icon: FileText, color: "text-green-400", link: "/notes" },
@@ -115,36 +242,90 @@ export default function Dashboard() {
         {/* Left Side Panel - Today's Schedule & High Priority */}
         <div className="lg:col-span-2 space-y-4">
           
-          {/* Today's Schedule panel */}
+          {/* Today's Schedule & To-Dos panel */}
           <div className="hud-glass p-5 rounded-xl space-y-4">
             <div className="flex items-center justify-between border-b border-hud-border/40 pb-3">
               <div className="flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-hud-accent" />
-                <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-hud-text">Today's Schedule</h3>
+                <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-hud-text">Today's Schedule & Tasks</h3>
               </div>
               <Link to="/calendar" className="text-[10px] font-mono text-hud-accent hover:underline flex items-center gap-1">
                 OPEN CALENDAR <ArrowRight className="w-3 h-3" />
               </Link>
             </div>
 
-            {todayEvents.length === 0 ? (
-              <p className="text-xs text-hud-muted font-mono py-4">No events scheduled for today.</p>
-            ) : (
-              <div className="space-y-2">
-                {todayEvents.map(event => (
-                  <div key={event.id} className="p-3 bg-slate-950/40 border border-hud-border/60 rounded-lg flex justify-between items-center text-sm font-mono hover:border-hud-accent/50 transition-colors">
-                    <div>
-                      <span className="text-xs font-semibold text-hud-text">{event.title}</span>
-                      <p className="text-[10px] text-hud-muted mt-1">{event.location || 'No Location'}</p>
-                    </div>
-                    <div className="text-[10px] text-hud-accent flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {new Date(event.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </div>
+            {/* Split layout: Left for Events, Right for Tasks */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Today's Events */}
+              <div className="space-y-3">
+                <h4 className="text-[10px] uppercase font-mono tracking-wider text-hud-accent font-semibold border-b border-hud-accent/10 pb-1 flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-hud-accent animate-pulse"></span>
+                  Events Schedule
+                </h4>
+                {todayEvents.length === 0 ? (
+                  <p className="text-xs text-hud-muted font-mono py-2">No events scheduled.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {todayEvents.map(event => (
+                      <div key={event.id} className="p-2.5 bg-slate-950/40 border border-hud-border/40 hover:border-hud-accent/40 rounded-lg flex justify-between items-center text-xs font-mono transition-all">
+                        <div className="truncate pr-2">
+                          <p className="font-semibold text-hud-text truncate">{event.title}</p>
+                          <p className="text-[9px] text-hud-muted mt-0.5 truncate">{event.location || 'No Location'}</p>
+                        </div>
+                        <div className="text-[9px] text-hud-accent shrink-0 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {new Date(event.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
-            )}
+
+              {/* Today's To-Do List */}
+              <div className="space-y-3">
+                <h4 className="text-[10px] uppercase font-mono tracking-wider text-purple-400 font-semibold border-b border-purple-500/10 pb-1 flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-purple-400 animate-pulse"></span>
+                  Daily Checklist
+                </h4>
+                {todayTasks.length === 0 ? (
+                  <p className="text-xs text-hud-muted font-mono py-2">No active tasks due today.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {todayTasks.map(task => (
+                      <div key={task.id} className="p-2.5 bg-slate-950/40 border border-hud-border/40 hover:border-purple-500/30 rounded-lg flex justify-between items-center text-xs font-mono transition-all">
+                        <div className="flex items-center gap-2 pr-2 min-w-0">
+                          {/* Checkbox to complete task */}
+                          <input
+                            type="checkbox"
+                            checked={task.status === 'Completed'}
+                            onChange={() => handleToggleTaskComplete(task)}
+                            className="w-3.5 h-3.5 rounded border-hud-border/60 bg-slate-950 text-hud-accent focus:ring-hud-accent/30 cursor-pointer"
+                          />
+                          <div className="truncate">
+                            <span className="font-semibold text-hud-text truncate block">
+                              {task.title}
+                            </span>
+                            <span className="text-[8px] text-hud-muted uppercase tracking-widest block mt-0.5">
+                              {task.estimated_duration ? `${task.estimated_duration}m` : '0m'} est • {getDynamicPriority(task)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Shift to Tomorrow Button */}
+                        <button
+                          title="Shift to Tomorrow"
+                          onClick={() => handleShiftToTomorrow(task)}
+                          className="p-1 rounded bg-slate-900 border border-hud-border/40 text-hud-muted hover:text-hud-accent hover:border-hud-accent/60 transition-all cursor-pointer shrink-0"
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* High Priority Tasks panel */}
@@ -163,33 +344,43 @@ export default function Dashboard() {
               <p className="text-xs text-hud-muted font-mono py-4">No critical priority items pending.</p>
             ) : (
               <div className="space-y-2">
-                {highPriorityTasks.map(task => (
-                  <div key={task.id} className="p-3 bg-slate-950/40 border border-hud-border/60 rounded-lg flex justify-between items-center text-sm font-mono hover:border-red-400/50 transition-colors">
-                    <div>
-                      <span className="text-xs font-semibold text-hud-text">{task.title}</span>
-                      <div className="flex gap-2 items-center mt-1">
-                        <span className="text-[9px] uppercase bg-red-950 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded">
-                          {task.priority}
-                        </span>
-                        <span className="text-[9px] uppercase bg-slate-900 text-hud-muted border border-hud-border/40 px-1.5 py-0.5 rounded">
-                          {task.status}
-                        </span>
+                {highPriorityTasks.map(task => {
+                  const dynPriority = getDynamicPriority(task);
+                  const badgeStyles = getPriorityBadgeStyles(dynPriority);
+                  
+                  return (
+                    <div key={task.id} className="p-3 bg-slate-950/40 border border-hud-border/60 rounded-lg flex justify-between items-center text-sm font-mono hover:border-hud-accent/30 transition-colors">
+                      <div className="min-w-0 pr-2">
+                        <span className="text-xs font-semibold text-hud-text truncate block">{task.title}</span>
+                        <div className="flex gap-2 items-center mt-1.5 flex-wrap">
+                          <span className={`text-[8px] uppercase border px-1.5 py-0.5 rounded ${badgeStyles}`}>
+                            {dynPriority}
+                          </span>
+                          <span className="text-[8px] uppercase bg-slate-900 text-hud-muted border border-hud-border/40 px-1.5 py-0.5 rounded">
+                            {task.status}
+                          </span>
+                          {task.estimated_duration > 0 && (
+                            <span className="text-[8px] text-hud-muted flex items-center gap-0.5 bg-slate-900 px-1.5 py-0.5 rounded border border-hud-border/40">
+                              <Clock className="w-2.5 h-2.5" /> {task.estimated_duration}m
+                            </span>
+                          )}
+                        </div>
                       </div>
+                      {task.deadline && (
+                        <span className="text-[10px] text-hud-muted shrink-0">
+                          Due: {new Date(task.deadline).toLocaleDateString()}
+                        </span>
+                      )}
                     </div>
-                    {task.deadline && (
-                      <span className="text-[10px] text-red-400/80">
-                        Due: {new Date(task.deadline).toLocaleDateString()}
-                      </span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
 
           {/* Overdue/Deadlines panel */}
           {overdueTasks.length > 0 && (
-            <div className="hud-glass p-5 rounded-xl border-red-500/20 bg-red-950/10 space-y-4">
+            <div className="hud-glass p-5 rounded-xl border border-red-500/20 bg-red-950/10 space-y-4">
               <div className="flex items-center gap-2 border-b border-red-500/20 pb-3">
                 <AlertTriangle className="w-4 h-4 text-red-500 animate-bounce" />
                 <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-red-400">Overdue Protocols</h3>
